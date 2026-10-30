@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#090d18"><title>Runner by Ariyan</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080d19;color:#fff;font-family:Inter,system-ui,Arial}
+#game{display:block;width:100vw;height:100dvh;touch-action:none}
+.overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:18px;background:linear-gradient(135deg,rgba(5,10,24,.94),rgba(13,23,43,.88));z-index:5}
+.panel{width:min(460px,100%);padding:28px;border:1px solid #334764;border-radius:24px;background:linear-gradient(145deg,#17243a,#0b1221);box-shadow:0 24px 80px #0009;text-align:center}
+.logo{font-size:clamp(30px,8vw,52px);font-weight:1000;letter-spacing:-2px;line-height:1;color:#fff}.logo span{color:#55e6c1}
+.sub{color:#b8c7dc;margin:12px 0 22px}.btn{border:0;border-radius:14px;padding:14px 20px;font-weight:900;font-size:16px;background:#54e6c0;color:#07151a;cursor:pointer;width:100%;margin-top:10px}
+.btn.secondary{background:#243650;color:white;border:1px solid #45607e}.small{font-size:12px;color:#9fb2ca;line-height:1.5}
+#facePreview{width:82px;height:82px;border-radius:50%;object-fit:cover;background:#263750;border:3px solid #55e6c1;display:block;margin:16px auto 8px}
+input[type=file]{display:none}.upload{display:inline-block;padding:10px 15px;border-radius:12px;background:#263650;color:#fff;font-weight:700;cursor:pointer;margin:5px}
+#hud{position:fixed;top:14px;left:14px;right:14px;display:none;justify-content:space-between;align-items:flex-start;pointer-events:none;z-index:2}
+.pill{background:#091426d9;border:1px solid #47617b;padding:9px 13px;border-radius:14px;font-weight:900;box-shadow:0 5px 20px #0005}
+#pause{pointer-events:auto;border:0;color:white;background:#091426d9;border:1px solid #47617b;border-radius:12px;padding:9px 12px;font-size:18px}
+#hint{position:fixed;bottom:18px;left:0;right:0;text-align:center;color:#d8e7f7;text-shadow:0 2px 6px #000;z-index:2;pointer-events:none;font-size:12px}
+#gameover{display:none}
+@media(max-height:600px){.panel{padding:17px}.sub{margin:7px 0 12px}.btn{padding:10px}}
+</style></head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud"><div class="pill">🪙 <span id="coins">0</span> &nbsp; · &nbsp; <span id="distance">0</span> m</div><button id="pause">Ⅱ</button></div>
+<div id="hint">← → CHANGE LANE &nbsp; · &nbsp; ↑ JUMP &nbsp; · &nbsp; ↓ SLIDE &nbsp; · &nbsp; SWIPE ON MOBILE</div>
+<div class="overlay" id="start">
+ <div class="panel"><div class="logo">RUNNER <span>BY ARIYAN</span></div><div class="sub">Dodge • Run • Collect • Beat your best</div>
+ <img id="facePreview" alt="Character face preview"><label class="upload" for="faceFile">📸 Upload your face</label><input id="faceFile" type="file" accept="image/*">
+ <div class="small">Your photo is used locally in this browser. It is not uploaded.</div>
+ <button class="btn" id="startBtn">▶ START RUN</button><div class="small">AUDIO 1 plays when the run starts · AUDIO 3 plays when the run ends</div></div>
+</div>
+<div class="overlay" id="gameover"><div class="panel"><div class="logo">RUN <span>OVER!</span></div><div class="sub">Nice try, runner. Ready for another round?</div><h2 id="finalScore">0 m</h2><p>🪙 Coins: <b id="finalCoins">0</b> &nbsp; · &nbsp; 🏆 Best: <b id="best">0</b> m</p><button class="btn" id="again">↻ RUN AGAIN</button><button class="btn secondary" id="changeFace">Change face</button></div></div>
+<div class="overlay" id="paused" style="display:none"><div class="panel"><div class="logo">PAUSED</div><div class="sub">Take a breath. The tracks can wait.</div><button class="btn" id="resume">RESUME</button><button class="btn secondary" id="restart">RESTART</button></div></div>
+<audio id="audioStart" src="assets/audio-1-start.mp3" preload="auto"></audio><audio id="audioEnd" src="assets/audio-3-gameover.mp3" preload="auto"></audio>
+<script>
+(()=>{
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const $=id=>document.getElementById(id);
+let W=innerWidth,H=innerHeight,dpr=1,face=null,state='menu',last=0,elapsed=0,distance=0,coins=0,speed=0.34,spawn=0,objects=[],lane=1,jump=0,slide=0,shake=0;
+let best=+(localStorage.getItem('runnerAriyanBest')||0);
+const startAudio=$('audioStart'),endAudio=$('audioEnd');
+function resize(){W=innerWidth;H=innerHeight;dpr=Math.min(devicePixelRatio||1,2);canvas.width=W*dpr;canvas.height=H*dpr;canvas.style.width=W+'px';canvas.style.height=H+'px';ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener('resize',resize);resize();
+function rounded(x,y,w,h,r,fill){ctx.fillStyle=fill;ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill()}
+function drawFace(x,y,r){ctx.save();ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.clip();if(face){ctx.drawImage(face,x-r,y-r,r*2,r*2)}else{let g=ctx.createLinearGradient(x-r,y-r,x+r,y+r);g.addColorStop(0,'#f7c89b');g.addColorStop(1,'#a85f3b');ctx.fillStyle=g;ctx.fillRect(x-r,y-r,r*2,r*2);ctx.fillStyle='#1a2636';ctx.fillRect(x-r,y+r*.28,r*2,r*.75);ctx.fillStyle='#25202a';ctx.beginPath();ctx.arc(x,y-r*.48,r*.82,Math.PI,0);ctx.fill();ctx.fillStyle='#211a18';ctx.beginPath();ctx.arc(x-r*.3,y-r*.05,r*.07,0,7);ctx.arc(x+r*.3,y-r*.05,r*.07,0,7);ctx.fill();ctx.strokeStyle='#7b3027';ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y+r*.18,r*.22,.15,Math.PI-.15);ctx.stroke()}ctx.restore();ctx.strokeStyle='#55e6c1';ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.stroke()}
+function horizon(){return H*.22}
+function laneX(l,z){let t=Math.max(0,Math.min(1,z));let roadW=W*(.22+.68*t);let center=W/2;return center+(l-1)*roadW*.31}
+function drawWorld(dt){
+ let sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#101b36');sky.addColorStop(.55,'#273b57');sky.addColorStop(1,'#101b27');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+ let hy=horizon();ctx.fillStyle='#172b37';ctx.fillRect(0,hy,W,H-hy);
+ // skyline
+ for(let i=0;i<18;i++){let x=i*W/16-(W/32),bw=W/22,bh=H*(.08+(i*37%11)/100);ctx.fillStyle=i%2?'#1a2b43':'#21334a';ctx.fillRect(x,hy-bh,bw,bh)}
+ // road perspective
+ ctx.fillStyle='#343d4a';ctx.beginPath();ctx.moveTo(W*.39,hy);ctx.lineTo(W*.61,hy);ctx.lineTo(W*1.04,H);ctx.lineTo(-W*.04,H);ctx.closePath();ctx.fill();
+ ctx.strokeStyle='#a4b6c6';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(W*.39,hy);ctx.lineTo(-W*.04,H);ctx.moveTo(W*.61,hy);ctx.lineTo(W*1.04,H);ctx.stroke();
+ // dashed lane lines
+ let offset=(elapsed*speed*H*.7)%70;
+ for(let i=0;i<10;i++){let z=(i*70+offset)/H;let y=hy+(H-hy)*z;let half=W*(.11+.34*z);ctx.strokeStyle='#9ba9b5';ctx.lineWidth=1+z*3;ctx.setLineDash([18*z+2,18*z+2]);ctx.beginPath();ctx.moveTo(W/2-half/3,y);ctx.lineTo(W/2+half/3,y);ctx.stroke()}ctx.setLineDash([]);
+ // side lights
+ for(let i=0;i<8;i++){let z=((i/8+elapsed*.14)%1);let y=hy+z*(H-hy),spread=W*(.12+.4*z);ctx.fillStyle='#55e6c1';ctx.globalAlpha=.2+.6*z;ctx.fillRect(W/2-spread-4,y,3+z*4,7+z*10);ctx.fillRect(W/2+spread,y,3+z*4,7+z*10)}ctx.globalAlpha=1;
+}
+function drawObject(o){let z=o.z,t=z, x=laneX(o.lane,t),y=horizon()+(H-horizon())*t,scale=.2+1.2*t;
+ if(o.type==='coin'){ctx.fillStyle='#ffd34e';ctx.beginPath();ctx.ellipse(x,y-20*scale,9*scale,13*scale,0,0,7);ctx.fill();ctx.strokeStyle='#fff1a3';ctx.lineWidth=2*scale;ctx.stroke();ctx.fillStyle='#9c6413';ctx.font=`bold ${12*scale}px Arial`;ctx.textAlign='center';ctx.fillText('$',x,y-16*scale)}
+ else if(o.type==='barrier'){rounded(x-25*scale,y-42*scale,50*scale,42*scale,5*scale,'#e66b42');ctx.fillStyle='#ffd36c';ctx.fillRect(x-25*scale,y-33*scale,50*scale,8*scale);ctx.fillStyle='#442d2b';ctx.fillRect(x-20*scale,y-10*scale,40*scale,10*scale)}
+ else if(o.type==='train'){rounded(x-36*scale,y-110*scale,72*scale,110*scale,10*scale,'#397d9b');rounded(x-27*scale,y-98*scale,54*scale,32*scale,5*scale,'#9ee9e2');ctx.fillStyle='#e9f7f4';ctx.fillRect(x-29*scale,y-52*scale,58*scale,5*scale);ctx.fillStyle='#f8c95b';ctx.fillRect(x-25*scale,y-8*scale,12*scale,7*scale);ctx.fillRect(x+13*scale,y-8*scale,12*scale,7*scale)}
+ else {rounded(x-30*scale,y-85*scale,60*scale,24*scale,8*scale,'#e6a83e');ctx.fillStyle='#392d25';ctx.fillRect(x-22*scale,y-78*scale,44*scale,5*scale)}
+}
+function drawPlayer(){
+ let x=laneX(lane,1),ground=H*.83, lift=jump>0?Math.sin((1-jump)*Math.PI)*H*.18:0, y=ground-lift;
+ if(slide>0){rounded(x-30,y-30,60,25,12,'#31a9a0');drawFace(x,y-35,17)}
+ else { // legs
+ ctx.strokeStyle='#172337';ctx.lineWidth=13;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(x-10,y-26);ctx.lineTo(x-16,y);ctx.moveTo(x+10,y-26);ctx.lineTo(x+17,y);ctx.stroke();
+ rounded(x-24,y-84,48,58,13,'#20b6a2');ctx.fillStyle='#dcebf1';ctx.fillRect(x-18,y-77,36,6);
+ drawFace(x,y-103,25);
+ }
+}
+function update(dt){
+ elapsed+=dt;distance+=dt*(speed*100);speed=Math.min(.62,.34+distance/18000);
+ spawn-=dt;if(spawn<=0){let l=Math.floor(Math.random()*3),r=Math.random();objects.push({lane:l,z:0,type:r<.34?'coin':r<.66?'barrier':r<.84?'train':'overhead'});if(r<.34&&Math.random()<.7)objects.push({lane:(l+1)%3,z:0,type:'coin'});spawn=Math.max(.42,1.05-distance/10000)}
+ jump=Math.max(0,jump-dt*1.8);slide=Math.max(0,slide-dt*1.4);
+ for(let o of objects)o.z+=dt*speed;
+ objects=objects.filter(o=>o.z<1.08);
+ for(let o of objects){if(o.z>.88&&o.z<1.02&&o.lane===lane){if(o.type==='coin'){coins++;o.z=2}else if((o.type==='barrier'&&jump>0)||(o.type==='overhead'&&slide>0)){o.z=2}else{endGame();break}}}
+ $('coins').textContent=coins;$('distance').textContent=Math.floor(distance);
+}
+function render(){drawWorld();objects.sort((a,b)=>a.z-b.z).forEach(drawObject);drawPlayer()}
+function loop(ts){if(state!=='playing')return;let dt=Math.min((ts-last)/1000||0,.04);last=ts;update(dt);render();if(state==='playing')requestAnimationFrame(loop)}
+function begin(){state='playing';elapsed=distance=coins=0;speed=.34;spawn=.5;objects=[];lane=1;jump=slide=0;startAudio.pause();startAudio.currentTime=0;endAudio.pause();endAudio.currentTime=0;startAudio.play().catch(()=>{});$('start').style.display='none';$('gameover').style.display='none';$('paused').style.display='none';$('hud').style.display='flex';$('hint').style.display='block';last=performance.now();requestAnimationFrame(loop)}
+function endGame(){if(state!=='playing')return;state='over';endAudio.currentTime=0;endAudio.play().catch(()=>{});best=Math.max(best,Math.floor(distance));localStorage.setItem('runnerAriyanBest',best);$('finalScore').textContent=Math.floor(distance)+' m';$('finalCoins').textContent=coins;$('best').textContent=best;$('gameover').style.display='flex';$('hud').style.display='none'}
+function pause(){if(state==='playing'){state='paused';$('paused').style.display='flex';$('hud').style.display='none';startAudio.pause()}}
+function resume(){state='playing';$('paused').style.display='none';$('hud').style.display='flex';last=performance.now();requestAnimationFrame(loop)}
+function act(a){if(state!=='playing')return;if(a==='left')lane=Math.max(0,lane-1);if(a==='right')lane=Math.min(2,lane+1);if(a==='jump'&&jump===0&&slide===0)jump=1;if(a==='slide'&&jump===0)slide=1}
+addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' ','a','d','w','s'].includes(e.key))e.preventDefault();if(e.key==='ArrowLeft'||e.key==='a')act('left');if(e.key==='ArrowRight'||e.key==='d')act('right');if(e.key==='ArrowUp'||e.key==='w'||e.key===' ')act('jump');if(e.key==='ArrowDown'||e.key==='s')act('slide');if(e.key==='Escape'||e.key==='p')pause()});
+let sx=0,sy=0;canvas.addEventListener('touchstart',e=>{sx=e.changedTouches[0].clientX;sy=e.changedTouches[0].clientY},{passive:true});canvas.addEventListener('touchend',e=>{let dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;if(Math.max(Math.abs(dx),Math.abs(dy))<20)return;if(Math.abs(dx)>Math.abs(dy))act(dx>0?'right':'left');else act(dy<0?'jump':'slide')},{passive:true});
+$('faceFile').addEventListener('change',e=>{let f=e.target.files[0];if(!f)return;let u=URL.createObjectURL(f),im=new Image();im.onload=()=>{face=im;$('facePreview').src=u};im.src=u});
+$('startBtn').onclick=begin;$('again').onclick=begin;$('pause').onclick=pause;$('resume').onclick=resume;$('restart').onclick=begin;$('changeFace').onclick=()=>{$('gameover').style.display='none';$('start').style.display='flex';$('hud').style.display='none';state='menu'};render();
+})();
+</script></body></html>
